@@ -180,7 +180,7 @@ The `SubscriptionArn` field must be a full ARN (not the string `PendingConfirmat
 
 | Name | Version |
 |------|---------|
-| terraform | >= 1.0 |
+| terraform | >= 1.3 |
 | aws provider | ~> 6.0 |
 
 ---
@@ -196,6 +196,7 @@ The `SubscriptionArn` field must be a full ARN (not the string `PendingConfirmat
 | `chatbot_configuration_name` | Name of the AWS Chatbot Slack channel configuration. Must be unique within the AWS account. | `string` | — | yes |
 | `chatbot_role_name` | Name of the IAM role assumed by AWS Chatbot. | `string` | — | yes |
 | `budget_amount` | Monthly budget limit in USD. Must be greater than 0. | `number` | `2000` | no |
+| `cost_types` | Which cost components the budget measures. `null` keeps the AWS Budgets defaults (net invoiced spend); set `include_credit = false` on accounts that receive credits. Unset fields fall back to the AWS default for that field. | `object({ ... })` | `null` | no |
 | `tags` | Tags to apply to all taggable resources created by this module. | `map(string)` | `{}` | no |
 
 ---
