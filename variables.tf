@@ -55,3 +55,21 @@ variable "chatbot_role_name" {
   type        = string
   description = "IAM role name for AWS Chatbot"
 }
+
+variable "cost_types" {
+  type = object({
+    include_credit             = optional(bool)
+    include_discount           = optional(bool)
+    include_other_subscription = optional(bool)
+    include_recurring          = optional(bool)
+    include_refund             = optional(bool)
+    include_subscription       = optional(bool)
+    include_support            = optional(bool)
+    include_tax                = optional(bool)
+    include_upfront            = optional(bool)
+    use_amortized              = optional(bool)
+    use_blended                = optional(bool)
+  })
+  description = "Cost components the budget measures. Null keeps the AWS defaults (net invoiced spend); set include_credit = false to alert on gross spend on accounts that receive credits."
+  default     = null
+}

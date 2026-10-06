@@ -132,6 +132,25 @@ resource "aws_budgets_budget" "this" {
   time_unit    = "MONTHLY"
   tags         = merge(var.tags, { Name = var.budget_name })
 
+  # Omitted entirely when var.cost_types is null, so the budget keeps the AWS defaults.
+  dynamic "cost_types" {
+    for_each = var.cost_types == null ? [] : [var.cost_types]
+
+    content {
+      include_credit             = cost_types.value.include_credit
+      include_discount           = cost_types.value.include_discount
+      include_other_subscription = cost_types.value.include_other_subscription
+      include_recurring          = cost_types.value.include_recurring
+      include_refund             = cost_types.value.include_refund
+      include_subscription       = cost_types.value.include_subscription
+      include_support            = cost_types.value.include_support
+      include_tax                = cost_types.value.include_tax
+      include_upfront            = cost_types.value.include_upfront
+      use_amortized              = cost_types.value.use_amortized
+      use_blended                = cost_types.value.use_blended
+    }
+  }
+
   # Alert 1: Actual spend is > 80%
   notification {
     comparison_operator       = "GREATER_THAN"
