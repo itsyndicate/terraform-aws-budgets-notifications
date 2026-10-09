@@ -42,6 +42,79 @@ data "aws_iam_policy_document" "sns_topic_policy" {
       identifiers = ["chatbot.amazonaws.com"]
     }
   }
+
+  # Only added when anomaly alerts are enabled, so topics that carry budget
+  # alerts alone keep the smaller policy.
+  dynamic "statement" {
+    for_each = var.enable_cost_anomaly_alerts ? [1] : []
+    content {
+      sid       = "AWSAnomalyDetectionPublish"
+      effect    = "Allow"
+      actions   = ["SNS:Publish"]
+      resources = [aws_sns_topic.this.arn]
+
+      principals {
+        type        = "Service"
+        identifiers = ["costalerts.amazonaws.com"]
+      }
+
+      # Scopes the grant to this account, so the topic cannot be used as a
+      # notification target by another account's subscription.
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+    }
+  }
+}
+
+data "aws_caller_identity" "current" {}
+
+# Service-level anomaly monitor. If the account already has one (AWS adds
+# Default-Services-Monitor when Cost Explorer is first enabled on a standalone or
+# management account), import it here instead of creating a second one, or every
+# anomaly is detected and sent twice.
+resource "aws_ce_anomaly_monitor" "this" {
+  count = var.enable_cost_anomaly_alerts ? 1 : 0
+
+  name              = coalesce(var.cost_anomaly_monitor_name, "${var.sns_topic_name}-service-monitor")
+  monitor_type      = "DIMENSIONAL"
+  monitor_dimension = "SERVICE"
+
+  tags = var.tags
+}
+
+# Cost Anomaly Detection findings into the same topic, and therefore the same
+# Slack channel, as the budget alerts.
+resource "aws_ce_anomaly_subscription" "this" {
+  count = var.enable_cost_anomaly_alerts ? 1 : 0
+
+  name             = coalesce(var.cost_anomaly_subscription_name, "${var.sns_topic_name}-anomalies")
+  monitor_arn_list = [aws_ce_anomaly_monitor.this[0].arn]
+
+  # SNS subscribers require IMMEDIATE. DAILY and WEEKLY are delivered by email
+  # only, so they silently drop an SNS subscriber.
+  frequency = "IMMEDIATE"
+
+  subscriber {
+    type    = "SNS"
+    address = aws_sns_topic.this.arn
+  }
+
+  threshold_expression {
+    dimension {
+      key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
+      match_options = ["GREATER_THAN_OR_EQUAL"]
+      values        = [tostring(var.cost_anomaly_threshold)]
+    }
+  }
+
+  tags = var.tags
+
+  # The subscription is rejected if the topic does not already allow
+  # costalerts.amazonaws.com to publish.
+  depends_on = [aws_sns_topic_policy.this]
 }
 
 # IAM Role for AWS Chatbot

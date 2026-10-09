@@ -190,13 +190,17 @@ The `SubscriptionArn` field must be a full ARN (not the string `PendingConfirmat
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|----------|
 | `slack_team_id` | Slack Workspace/Team ID registered with AWS Chatbot. Starts with `T`, 9–11 chars. Obtain from the AWS Chatbot console after OAuth registration. | `string` | — | yes |
-| `slack_channel_id` | Slack Channel ID where budget alerts will be posted. Starts with `C`, 9–11 chars. Obtain from the channel URL in a browser. Must be a regular channel — Slack Connect (shared) channels are not supported. | `string` | — | yes |
+| `slack_channel_id` | Slack Channel ID where budget alerts will be posted. Starts with `C`, 9–11 chars. Obtain from the channel URL in a browser. The channel must be owned by a workspace this AWS account has registered with Chatbot (`aws chatbot describe-slack-workspaces`); otherwise delivery fails silently with `channel_not_found`. Sharing the channel with other organisations is fine. | `string` | — | yes |
 | `budget_name` | Name of the monthly cost budget. Should make scope obvious (e.g. `prod-monthly-budget`). | `string` | — | yes |
 | `sns_topic_name` | Name of the SNS Standard topic that bridges Budgets to Chatbot. | `string` | — | yes |
 | `chatbot_configuration_name` | Name of the AWS Chatbot Slack channel configuration. Must be unique within the AWS account. | `string` | — | yes |
 | `chatbot_role_name` | Name of the IAM role assumed by AWS Chatbot. | `string` | — | yes |
 | `budget_amount` | Monthly budget limit in USD. Must be greater than 0. | `number` | `2000` | no |
 | `cost_types` | Which cost components the budget measures. `null` keeps the AWS Budgets defaults (net invoiced spend); set `include_credit = false` on accounts that receive credits. Unset fields fall back to the AWS default for that field. | `object({ ... })` | `null` | no |
+| `enable_cost_anomaly_alerts` | Create a `SERVICE` Cost Anomaly Detection monitor, an `IMMEDIATE` subscription on it, and the `costalerts.amazonaws.com` publish statement on the SNS topic, so findings reach the same Slack channel as the budget alerts. If the account already has a service monitor (AWS adds `Default-Services-Monitor` when Cost Explorer is first enabled on a standalone or management account), import it into `aws_ce_anomaly_monitor.this[0]` instead of creating a second one. | `bool` | `false` | no |
+| `cost_anomaly_monitor_name` | Name of the anomaly monitor. Defaults to the SNS topic name with a `-service-monitor` suffix. When importing an existing monitor, set its current name to avoid a rename. | `string` | `null` | no |
+| `cost_anomaly_threshold` | Minimum absolute anomaly impact in USD before a finding is sent. | `number` | `100` | no |
+| `cost_anomaly_subscription_name` | Name of the anomaly subscription. Defaults to the SNS topic name with a `-anomalies` suffix. | `string` | `null` | no |
 | `tags` | Tags to apply to all taggable resources created by this module. | `map(string)` | `{}` | no |
 
 ---
