@@ -20,3 +20,8 @@ output "chatbot_iam_role_arn" {
   value       = aws_iam_role.chatbot.arn
   description = "ARN of the IAM role used by AWS Chatbot"
 }
+
+output "cost_anomaly_monitor_arn" {
+  value       = one(aws_ce_anomaly_monitor.this[*].arn)
+  description = "ARN of the Cost Anomaly Detection monitor. Null when anomaly alerts are disabled"
+}
