@@ -22,11 +22,32 @@ variable "slack_channel_id" {
 variable "budget_amount" {
   type        = number
   description = "Monthly budget limit in USD"
-  default     = 2000
 
   validation {
     condition     = var.budget_amount > 0
     error_message = "budget_amount must be a positive number greater than 0."
+  }
+}
+
+variable "budget_actual_threshold" {
+  type        = number
+  description = "Percentage of the budget that actual spend must exceed to send an alert"
+  default     = 80
+
+  validation {
+    condition     = var.budget_actual_threshold > 0
+    error_message = "budget_actual_threshold must be greater than 0."
+  }
+}
+
+variable "budget_forecast_threshold" {
+  type        = number
+  description = "Percentage of the budget that forecasted spend must exceed to send an alert"
+  default     = 100
+
+  validation {
+    condition     = var.budget_forecast_threshold > 0
+    error_message = "budget_forecast_threshold must be greater than 0."
   }
 }
 
@@ -76,13 +97,24 @@ variable "cost_types" {
 
 variable "enable_cost_anomaly_alerts" {
   type        = bool
-  description = "Create a Cost Anomaly Detection monitor and send its findings to the same Slack channel as the budget alerts."
+  description = "Send Cost Anomaly Detection findings to the same Slack channel as the budget alerts. Creates a SERVICE monitor unless cost_anomaly_monitor_arn is set."
   default     = false
+}
+
+variable "cost_anomaly_monitor_arn" {
+  type        = string
+  description = "ARN of an existing anomaly monitor to subscribe to, e.g. the services monitor AWS creates with Cost Explorer. When set, the module creates only the subscription and leaves the monitor untouched."
+  default     = null
+
+  validation {
+    condition     = var.cost_anomaly_monitor_arn == null || can(regex("^arn:aws:ce::[0-9]{12}:anomalymonitor/", var.cost_anomaly_monitor_arn))
+    error_message = "cost_anomaly_monitor_arn must be an anomaly monitor ARN (arn:aws:ce::<account-id>:anomalymonitor/<id>)."
+  }
 }
 
 variable "cost_anomaly_monitor_name" {
   type        = string
-  description = "Name of the anomaly monitor. Defaults to the SNS topic name with a -service-monitor suffix. To adopt an existing monitor, import it and set its current name here."
+  description = "Name of the anomaly monitor the module creates. Defaults to the SNS topic name with a -service-monitor suffix. Ignored when cost_anomaly_monitor_arn is set."
   default     = null
 }
 

@@ -22,6 +22,11 @@ output "chatbot_iam_role_arn" {
 }
 
 output "cost_anomaly_monitor_arn" {
-  value       = one(aws_ce_anomaly_monitor.this[*].arn)
-  description = "ARN of the Cost Anomaly Detection monitor. Null when anomaly alerts are disabled"
+  value       = var.enable_cost_anomaly_alerts ? coalesce(var.cost_anomaly_monitor_arn, one(aws_ce_anomaly_monitor.this[*].arn)) : null
+  description = "ARN of the Cost Anomaly Detection monitor the subscription uses, created by the module or passed in. Null when anomaly alerts are disabled"
+}
+
+output "cost_anomaly_subscription_arn" {
+  value       = one(aws_ce_anomaly_subscription.this[*].arn)
+  description = "ARN of the Cost Anomaly Detection subscription. Null when anomaly alerts are disabled"
 }

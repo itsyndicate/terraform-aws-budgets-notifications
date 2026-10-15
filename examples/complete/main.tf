@@ -1,12 +1,13 @@
 # Complete example — separate budget alerts for production and staging environments,
 # both routing to the same Slack workspace but different channels.
-# Demonstrates full tagging, custom budget amounts, and multi-environment usage.
+# Demonstrates full tagging, custom budget amounts, Cost Anomaly Detection
+# on an existing monitor, and multi-environment usage.
 #
 # Prerequisites before terraform apply:
 #   1. Register the Slack workspace with AWS Chatbot via the AWS Console OAuth flow.
 #   2. Obtain the Workspace ID (T...) from the AWS Chatbot console.
 #   3. Obtain the Channel IDs (C...) from the channel URLs in a browser.
-#      Channels must be regular (non-shared) channels in the registered workspace.
+#      Channels must be owned by the registered workspace (sharing them is fine).
 #   4. After apply, run /invite @Amazon Q in each target Slack channel.
 
 # --- Production budget ---
@@ -15,6 +16,12 @@ module "budget_alert_prod" {
 
   budget_name   = "prod-monthly-budget"
   budget_amount = 5000
+
+  # The account already has the services monitor AWS created with Cost Explorer,
+  # so only the subscription is added to it.
+  enable_cost_anomaly_alerts = true
+  cost_anomaly_monitor_arn   = var.cost_anomaly_monitor_arn
+  cost_anomaly_threshold     = 50
 
   sns_topic_name             = "prod-budget-alerts"
   chatbot_configuration_name = "prod-budget-alerts-slack"
@@ -69,6 +76,11 @@ variable "slack_channel_id_prod" {
 
 variable "slack_channel_id_staging" {
   description = "Slack Channel ID for staging budget alerts (starts with C)"
+  type        = string
+}
+
+variable "cost_anomaly_monitor_arn" {
+  description = "ARN of the existing services anomaly monitor in the production account (aws ce get-anomaly-monitors)"
   type        = string
 }
 

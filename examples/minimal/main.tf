@@ -1,5 +1,5 @@
 # Minimal example — single account-wide monthly budget with Slack alerts
-# Uses the default $2,000 budget limit.
+# and the default 80% actual / 100% forecasted alert thresholds.
 #
 # Prerequisites before terraform apply:
 #   1. Register the Slack workspace with AWS Chatbot via the AWS Console OAuth flow.
@@ -11,6 +11,7 @@ module "budget_alert" {
   source = "../../"
 
   budget_name                = "prod-monthly-budget"
+  budget_amount              = 2000
   sns_topic_name             = "prod-budget-alerts"
   chatbot_configuration_name = "prod-budget-alerts-slack"
   chatbot_role_name          = "prod-chatbot-budget-role"
