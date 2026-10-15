@@ -42,6 +42,86 @@ data "aws_iam_policy_document" "sns_topic_policy" {
       identifiers = ["chatbot.amazonaws.com"]
     }
   }
+
+  # Only added when anomaly alerts are enabled, so topics that carry budget
+  # alerts alone keep the smaller policy.
+  dynamic "statement" {
+    for_each = var.enable_cost_anomaly_alerts ? [1] : []
+    content {
+      sid       = "AWSAnomalyDetectionPublish"
+      effect    = "Allow"
+      actions   = ["SNS:Publish"]
+      resources = [aws_sns_topic.this.arn]
+
+      principals {
+        type        = "Service"
+        identifiers = ["costalerts.amazonaws.com"]
+      }
+
+      # Scopes the grant to this account, so the topic cannot be used as a
+      # notification target by another account's subscription.
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+    }
+  }
+}
+
+data "aws_caller_identity" "current" {}
+
+locals {
+  # An account can have only one SERVICE monitor. AWS creates one on payer and
+  # standalone accounts when Cost Explorer is enabled, together with a daily email
+  # subscription that points at it. In that case the existing monitor is passed in
+  # by ARN and only the subscription is created here.
+  create_cost_anomaly_monitor = var.enable_cost_anomaly_alerts && var.cost_anomaly_monitor_arn == null
+
+  cost_anomaly_monitor_name      = coalesce(var.cost_anomaly_monitor_name, "${var.sns_topic_name}-service-monitor")
+  cost_anomaly_subscription_name = coalesce(var.cost_anomaly_subscription_name, "${var.sns_topic_name}-anomalies")
+}
+
+resource "aws_ce_anomaly_monitor" "this" {
+  count = local.create_cost_anomaly_monitor ? 1 : 0
+
+  name              = local.cost_anomaly_monitor_name
+  monitor_type      = "DIMENSIONAL"
+  monitor_dimension = "SERVICE"
+
+  tags = merge(var.tags, { Name = local.cost_anomaly_monitor_name })
+}
+
+# Cost Anomaly Detection findings into the same topic, and therefore the same
+# Slack channel, as the budget alerts.
+resource "aws_ce_anomaly_subscription" "this" {
+  count = var.enable_cost_anomaly_alerts ? 1 : 0
+
+  name             = local.cost_anomaly_subscription_name
+  monitor_arn_list = [local.create_cost_anomaly_monitor ? aws_ce_anomaly_monitor.this[0].arn : var.cost_anomaly_monitor_arn]
+
+  # SNS subscribers require IMMEDIATE. DAILY and WEEKLY are delivered by email
+  # only, so they silently drop an SNS subscriber.
+  frequency = "IMMEDIATE"
+
+  subscriber {
+    type    = "SNS"
+    address = aws_sns_topic.this.arn
+  }
+
+  threshold_expression {
+    dimension {
+      key           = "ANOMALY_TOTAL_IMPACT_ABSOLUTE"
+      match_options = ["GREATER_THAN_OR_EQUAL"]
+      values        = [tostring(var.cost_anomaly_threshold)]
+    }
+  }
+
+  tags = merge(var.tags, { Name = local.cost_anomaly_subscription_name })
+
+  # The subscription is rejected if the topic does not already allow
+  # costalerts.amazonaws.com to publish.
+  depends_on = [aws_sns_topic_policy.this]
 }
 
 # IAM Role for AWS Chatbot
@@ -151,19 +231,19 @@ resource "aws_budgets_budget" "this" {
     }
   }
 
-  # Alert 1: Actual spend is > 80%
+  # Alert 1: actual spend is above budget_actual_threshold percent
   notification {
     comparison_operator       = "GREATER_THAN"
-    threshold                 = 80
+    threshold                 = var.budget_actual_threshold
     threshold_type            = "PERCENTAGE"
     notification_type         = "ACTUAL"
     subscriber_sns_topic_arns = [aws_sns_topic.this.arn]
   }
 
-  # Alert 2: Forecasted spend is > 100%
+  # Alert 2: forecasted spend is above budget_forecast_threshold percent
   notification {
     comparison_operator       = "GREATER_THAN"
-    threshold                 = 100
+    threshold                 = var.budget_forecast_threshold
     threshold_type            = "PERCENTAGE"
     notification_type         = "FORECASTED"
     subscriber_sns_topic_arns = [aws_sns_topic.this.arn]
