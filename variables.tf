@@ -29,6 +29,17 @@ variable "budget_amount" {
   }
 }
 
+variable "linked_account_ids" {
+  type        = list(string)
+  description = "Member account IDs the budget measures. Empty measures the whole account, or the whole organization in a management account. Set it only in the management account."
+  default     = []
+
+  validation {
+    condition     = alltrue([for id in var.linked_account_ids : can(regex("^[0-9]{12}$", id))])
+    error_message = "Each linked_account_ids value must be a 12-digit AWS account ID."
+  }
+}
+
 variable "budget_actual_threshold" {
   type        = number
   description = "Percentage of the budget that actual spend must exceed to send an alert"
@@ -112,9 +123,20 @@ variable "cost_anomaly_monitor_arn" {
   }
 }
 
+variable "cost_anomaly_monitor_dimension" {
+  type        = string
+  description = "Dimension of the anomaly monitor the module creates: SERVICE or LINKED_ACCOUNT. LINKED_ACCOUNT works only in a management account. Ignored when cost_anomaly_monitor_arn is set."
+  default     = "SERVICE"
+
+  validation {
+    condition     = contains(["SERVICE", "LINKED_ACCOUNT"], var.cost_anomaly_monitor_dimension)
+    error_message = "cost_anomaly_monitor_dimension must be SERVICE or LINKED_ACCOUNT."
+  }
+}
+
 variable "cost_anomaly_monitor_name" {
   type        = string
-  description = "Name of the anomaly monitor the module creates. Defaults to the SNS topic name with a -service-monitor suffix. Ignored when cost_anomaly_monitor_arn is set."
+  description = "Name of the anomaly monitor the module creates. Defaults to the SNS topic name with a -service-monitor or -linked-account-monitor suffix. Ignored when cost_anomaly_monitor_arn is set."
   default     = null
 }
 
@@ -128,4 +150,16 @@ variable "cost_anomaly_subscription_name" {
   type        = string
   description = "Name of the anomaly subscription. Defaults to the SNS topic name with a -anomalies suffix."
   default     = null
+}
+
+variable "chatbot_guardrail_policy_arns" {
+  type        = list(string)
+  description = "IAM policy ARNs that cap what Chatbot users can do in the channel. AWS uses AdministratorAccess when the list is not set."
+  default     = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+}
+
+variable "chatbot_user_authorization_required" {
+  type        = bool
+  description = "Require each Slack user to have their own IAM role mapping before they run commands through Chatbot."
+  default     = true
 }

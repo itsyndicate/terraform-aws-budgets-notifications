@@ -41,6 +41,18 @@ The module creates two budget alerts. The defaults follow the ITsyndicate fresh-
 
 `budget_amount` has no default and must be set for every account.
 
+## Budget scope
+
+`linked_account_ids` sets what the budget measures:
+
+| Account | `linked_account_ids` | The budget measures |
+|---------|----------------------|---------------------|
+| Member or standalone account | `[]` (default) | The spend of this account. |
+| Management account | `[]` (default) | The spend of the whole organization. |
+| Management account | `["<member account ID>", ...]` | The spend of the listed member accounts only. |
+
+One module call creates one budget. For an organization budget and per-account budgets, call the module once per budget. See [organization](./examples/organization).
+
 ## Cost Anomaly Detection
 
 With `enable_cost_anomaly_alerts = true` the module also sends Cost Anomaly Detection findings to the same Slack channel. It creates an `IMMEDIATE` subscription with an SNS subscriber and adds the `costalerts.amazonaws.com` publish statement to the topic policy.
@@ -51,6 +63,7 @@ An account can have only one `SERVICE` monitor. Since 27 March 2023 AWS creates 
 |---------|---------|----------------------|
 | Already has a services monitor (`aws ce get-anomaly-monitors`) | `cost_anomaly_monitor_arn = "<its ARN>"` | Creates only the subscription on the existing monitor. The monitor and the AWS email subscription stay untouched. |
 | No services monitor | leave `cost_anomaly_monitor_arn` unset | Creates the monitor and the subscription. |
+| Management account, per-account anomalies | `cost_anomaly_monitor_dimension = "LINKED_ACCOUNT"` | Creates a `LINKED_ACCOUNT` monitor and the subscription. Use it in a second module call next to the services monitor. |
 
 Do not import the AWS-created monitor into the module. A later destroy or change of the monitor would break the AWS email subscription that points at it.
 
@@ -90,6 +103,7 @@ Once both IDs are in hand, proceed with `terraform apply`.
 |---------|-------------|
 | [minimal](./examples/minimal) | Single account-wide budget. Only required variables. |
 | [complete](./examples/complete) | Separate budgets for production and staging, each routing to a different Slack channel, with full tagging and custom budget amounts. |
+| [organization](./examples/organization) | Management account: one organization budget, per-account budgets with `linked_account_ids`, and `SERVICE` plus `LINKED_ACCOUNT` anomaly alerts in one Slack channel. |
 
 ---
 
@@ -215,13 +229,17 @@ The `SubscriptionArn` field must be a full ARN (not the string `PendingConfirmat
 | `chatbot_role_name` | Name of the IAM role assumed by AWS Chatbot. | `string` | — | yes |
 | `budget_amount` | Monthly budget limit in USD. Must be greater than 0. | `number` | — | yes |
 | `budget_actual_threshold` | Percentage of the budget that actual spend must exceed to send an alert. | `number` | `80` | no |
+| `linked_account_ids` | Member account IDs the budget measures. Empty measures the whole account, or the whole organization in a management account. See [Budget scope](#budget-scope). | `list(string)` | `[]` | no |
 | `budget_forecast_threshold` | Percentage of the budget that forecasted spend must exceed to send an alert. | `number` | `100` | no |
 | `cost_types` | Which cost components the budget measures. `null` keeps the AWS Budgets defaults (net invoiced spend); set `include_credit = false` on accounts that receive credits. Unset fields fall back to the AWS default for that field. | `object({ ... })` | `null` | no |
 | `enable_cost_anomaly_alerts` | Send Cost Anomaly Detection findings to the same Slack channel as the budget alerts: an `IMMEDIATE` subscription plus the `costalerts.amazonaws.com` publish statement on the SNS topic. Creates a `SERVICE` monitor unless `cost_anomaly_monitor_arn` is set. See [Cost Anomaly Detection](#cost-anomaly-detection). | `bool` | `false` | no |
 | `cost_anomaly_monitor_arn` | ARN of an existing anomaly monitor to subscribe to, e.g. the services monitor AWS creates with Cost Explorer. When set, the module creates only the subscription and leaves the monitor untouched. | `string` | `null` | no |
-| `cost_anomaly_monitor_name` | Name of the anomaly monitor the module creates. Defaults to the SNS topic name with a `-service-monitor` suffix. Ignored when `cost_anomaly_monitor_arn` is set. | `string` | `null` | no |
+| `cost_anomaly_monitor_dimension` | Dimension of the monitor the module creates: `SERVICE` or `LINKED_ACCOUNT`. `LINKED_ACCOUNT` works only in a management account. Ignored when `cost_anomaly_monitor_arn` is set. | `string` | `"SERVICE"` | no |
+| `cost_anomaly_monitor_name` | Name of the anomaly monitor the module creates. Defaults to the SNS topic name with a `-service-monitor` or `-linked-account-monitor` suffix. Ignored when `cost_anomaly_monitor_arn` is set. | `string` | `null` | no |
 | `cost_anomaly_threshold` | Minimum absolute anomaly impact in USD before a finding is sent. | `number` | `100` | no |
 | `cost_anomaly_subscription_name` | Name of the anomaly subscription. Defaults to the SNS topic name with a `-anomalies` suffix. | `string` | `null` | no |
+| `chatbot_guardrail_policy_arns` | IAM policy ARNs that cap what Chatbot users can do in the channel. AWS uses `AdministratorAccess` when the list is not set. | `list(string)` | `["arn:aws:iam::aws:policy/ReadOnlyAccess"]` | no |
+| `chatbot_user_authorization_required` | Require each Slack user to have their own IAM role mapping before they run commands through Chatbot. | `bool` | `true` | no |
 | `tags` | Tags to apply to all taggable resources created by this module. | `map(string)` | `{}` | no |
 
 ---
@@ -244,12 +262,12 @@ The `SubscriptionArn` field must be a full ARN (not the string `PendingConfirmat
 | Resource | Type | Purpose |
 |----------|------|---------|
 | `aws_sns_topic.this` | `aws_sns_topic` | Receives alert payloads from Budgets, delivers them to Chatbot. |
-| `aws_sns_topic_policy.this` | `aws_sns_topic_policy` | Grants `budgets.amazonaws.com` publish access and `chatbot.amazonaws.com` subscribe/receive access. With anomaly alerts enabled, also grants `costalerts.amazonaws.com` publish access scoped to this account. |
+| `aws_sns_topic_policy.this` | `aws_sns_topic_policy` | Grants `budgets.amazonaws.com` publish access scoped to this account and `chatbot.amazonaws.com` subscribe/receive access. With anomaly alerts enabled, also grants `costalerts.amazonaws.com` publish access scoped to this account. |
 | `aws_iam_role.chatbot` | `aws_iam_role` | IAM role assumed by the Chatbot service. |
 | `aws_iam_role_policy.chatbot_notifications` | `aws_iam_role_policy` | Inline policy granting CloudWatch read, CloudWatch Logs read, and SNS read — equivalent to the "Notification permissions" template in the AWS Chatbot console. |
-| `aws_chatbot_slack_channel_configuration.this` | `aws_chatbot_slack_channel_configuration` | Wires the SNS topic to the Slack channel. Logging level set to `INFO`. |
-| `aws_budgets_budget.this` | `aws_budgets_budget` | Monthly COST budget with an actual and a forecasted alert threshold. |
-| `aws_ce_anomaly_monitor.this` | `aws_ce_anomaly_monitor` | `SERVICE` anomaly monitor. Only when `enable_cost_anomaly_alerts = true` and `cost_anomaly_monitor_arn` is not set. |
+| `aws_chatbot_slack_channel_configuration.this` | `aws_chatbot_slack_channel_configuration` | Wires the SNS topic to the Slack channel. Logging level set to `INFO`. The guardrail is `ReadOnlyAccess` by default. |
+| `aws_budgets_budget.this` | `aws_budgets_budget` | Monthly COST budget with an actual and a forecasted alert threshold. With `linked_account_ids`, a `LinkedAccount` cost filter. |
+| `aws_ce_anomaly_monitor.this` | `aws_ce_anomaly_monitor` | `SERVICE` or `LINKED_ACCOUNT` anomaly monitor. Only when `enable_cost_anomaly_alerts = true` and `cost_anomaly_monitor_arn` is not set. |
 | `aws_ce_anomaly_subscription.this` | `aws_ce_anomaly_subscription` | `IMMEDIATE` subscription that sends findings above `cost_anomaly_threshold` to the SNS topic. Only when `enable_cost_anomaly_alerts = true`. |
 
 ---
@@ -301,6 +319,17 @@ aws logs tail /aws/chatbot/<chatbot_configuration_name> \
   --since 30m \
   --region us-east-1
 ```
+
+---
+
+## Upgrade from v2.0.0
+
+v2.1.0 adds no required inputs and moves no resources. A plan on an existing stack shows two in-place changes:
+
+| Resource | Change | To keep the v2.0.0 behaviour |
+|----------|--------|------------------------------|
+| `aws_chatbot_slack_channel_configuration.this` | The guardrail changes from `AdministratorAccess` to `ReadOnlyAccess`. `user_authorization_required` changes to `true`. | Set `chatbot_guardrail_policy_arns = ["arn:aws:iam::aws:policy/AdministratorAccess"]` and `chatbot_user_authorization_required = false`. |
+| `aws_sns_topic_policy.this` | The `AWSBudgetsPublish` statement gets an `aws:SourceAccount` condition. | No action. Budgets in this account still publish. |
 
 ---
 

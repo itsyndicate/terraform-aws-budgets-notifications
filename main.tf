@@ -26,6 +26,12 @@ data "aws_iam_policy_document" "sns_topic_policy" {
       type        = "Service"
       identifiers = ["budgets.amazonaws.com"]
     }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
   }
 
   statement {
@@ -78,7 +84,7 @@ locals {
   # by ARN and only the subscription is created here.
   create_cost_anomaly_monitor = var.enable_cost_anomaly_alerts && var.cost_anomaly_monitor_arn == null
 
-  cost_anomaly_monitor_name      = coalesce(var.cost_anomaly_monitor_name, "${var.sns_topic_name}-service-monitor")
+  cost_anomaly_monitor_name      = coalesce(var.cost_anomaly_monitor_name, "${var.sns_topic_name}-${lower(replace(var.cost_anomaly_monitor_dimension, "_", "-"))}-monitor")
   cost_anomaly_subscription_name = coalesce(var.cost_anomaly_subscription_name, "${var.sns_topic_name}-anomalies")
 }
 
@@ -87,7 +93,7 @@ resource "aws_ce_anomaly_monitor" "this" {
 
   name              = local.cost_anomaly_monitor_name
   monitor_type      = "DIMENSIONAL"
-  monitor_dimension = "SERVICE"
+  monitor_dimension = var.cost_anomaly_monitor_dimension
 
   tags = merge(var.tags, { Name = local.cost_anomaly_monitor_name })
 }
@@ -200,7 +206,11 @@ resource "aws_chatbot_slack_channel_configuration" "this" {
   slack_team_id      = var.slack_team_id
   sns_topic_arns     = [aws_sns_topic.this.arn]
   logging_level      = "INFO"
-  tags               = merge(var.tags, { Name = var.chatbot_configuration_name })
+
+  guardrail_policy_arns       = var.chatbot_guardrail_policy_arns
+  user_authorization_required = var.chatbot_user_authorization_required
+
+  tags = merge(var.tags, { Name = var.chatbot_configuration_name })
 }
 
 # AWS Budgets: Monthly cost budget
@@ -211,6 +221,16 @@ resource "aws_budgets_budget" "this" {
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
   tags         = merge(var.tags, { Name = var.budget_name })
+
+  # Omitted when var.linked_account_ids is empty, so the budget covers the whole account or organization.
+  dynamic "cost_filter" {
+    for_each = length(var.linked_account_ids) > 0 ? [var.linked_account_ids] : []
+
+    content {
+      name   = "LinkedAccount"
+      values = cost_filter.value
+    }
+  }
 
   # Omitted entirely when var.cost_types is null, so the budget keeps the AWS defaults.
   dynamic "cost_types" {
