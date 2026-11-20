@@ -2,13 +2,13 @@
 # Outputs
 #-----------------------------------------------------------------------------------------------------------------------
 output "sns_topic_arn" {
-  value       = aws_sns_topic.this.arn
-  description = "ARN of the SNS topic used for budget alerts"
+  value       = local.sns_topic_arn
+  description = "ARN of the SNS topic used for budget alerts, created by the module or passed in"
 }
 
 output "chatbot_configuration_arn" {
-  value       = aws_chatbot_slack_channel_configuration.this.chat_configuration_arn
-  description = "ARN of the AWS Chatbot Slack configuration"
+  value       = one(aws_chatbot_slack_channel_configuration.this[*].chat_configuration_arn)
+  description = "ARN of the AWS Chatbot Slack configuration. Null when create_chatbot is false"
 }
 
 output "budget_id" {
@@ -17,8 +17,8 @@ output "budget_id" {
 }
 
 output "chatbot_iam_role_arn" {
-  value       = aws_iam_role.chatbot.arn
-  description = "ARN of the IAM role used by AWS Chatbot"
+  value       = one(aws_iam_role.chatbot[*].arn)
+  description = "ARN of the IAM role used by AWS Chatbot. Null when create_chatbot is false"
 }
 
 output "cost_anomaly_monitor_arn" {

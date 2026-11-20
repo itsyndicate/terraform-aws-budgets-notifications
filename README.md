@@ -53,6 +53,19 @@ The module creates two budget alerts. The defaults follow the ITsyndicate fresh-
 
 One module call creates one budget. For an organization budget and per-account budgets, call the module once per budget. See [organization](./examples/organization).
 
+## Several budgets in one Slack channel
+
+AWS permits **one** Chatbot configuration per Slack channel in an account. A second configuration for the same channel fails with `Slack channel with ID … has already been configured for AWS account …`.
+
+To send several budgets to one channel:
+
+| Module call | Settings | What it creates |
+|---|---|---|
+| The first call | defaults | The SNS topic, the topic policy, the Chatbot configuration and its IAM role |
+| Every other call | `create_sns_topic = false`, `sns_topic_arn = <sns_topic_arn output of the first call>`, `create_chatbot = false` | The budget and the anomaly resources only. They publish to the topic of the first call |
+
+Enable anomaly alerts in the first call when any call enables them. The `costalerts.amazonaws.com` statement goes into the topic policy only from a call with `enable_cost_anomaly_alerts = true`.
+
 ## Cost Anomaly Detection
 
 With `enable_cost_anomaly_alerts = true` the module also sends Cost Anomaly Detection findings to the same Slack channel. It creates an `IMMEDIATE` subscription with an SNS subscriber and adds the `costalerts.amazonaws.com` publish statement to the topic policy.
@@ -221,12 +234,12 @@ The `SubscriptionArn` field must be a full ARN (not the string `PendingConfirmat
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|----------|
-| `slack_team_id` | Slack Workspace/Team ID registered with AWS Chatbot. Starts with `T`, 9–11 chars. Obtain from the AWS Chatbot console after OAuth registration. | `string` | — | yes |
-| `slack_channel_id` | Slack Channel ID where budget alerts will be posted. Starts with `C`, 9–11 chars. Obtain from the channel URL in a browser. The channel must be owned by a workspace this AWS account has registered with Chatbot (`aws chatbot describe-slack-workspaces`); otherwise delivery fails silently with `channel_not_found`. Sharing the channel with other organisations is fine. | `string` | — | yes |
+| `slack_team_id` | Required when `create_chatbot = true`. Slack Workspace/Team ID registered with AWS Chatbot. Starts with `T`, 9–11 chars. Obtain from the AWS Chatbot console after OAuth registration. | `string` | `null` | no |
+| `slack_channel_id` | Slack Channel ID where budget alerts will be posted. Starts with `C`, 9–11 chars. Obtain from the channel URL in a browser. The channel must be owned by a workspace this AWS account has registered with Chatbot (`aws chatbot describe-slack-workspaces`); otherwise delivery fails silently with `channel_not_found`. Sharing the channel with other organisations is fine. Required when `create_chatbot = true`. | `string` | `null` | no |
 | `budget_name` | Name of the monthly cost budget. Should make scope obvious (e.g. `prod-monthly-budget`). | `string` | — | yes |
 | `sns_topic_name` | Name of the SNS Standard topic that bridges Budgets to Chatbot. | `string` | — | yes |
-| `chatbot_configuration_name` | Name of the AWS Chatbot Slack channel configuration. Must be unique within the AWS account. | `string` | — | yes |
-| `chatbot_role_name` | Name of the IAM role assumed by AWS Chatbot. | `string` | — | yes |
+| `chatbot_configuration_name` | Name of the AWS Chatbot Slack channel configuration. Must be unique within the AWS account. Required when `create_chatbot = true`. | `string` | `null` | no |
+| `chatbot_role_name` | Name of the IAM role assumed by AWS Chatbot. Required when `create_chatbot = true`. | `string` | `null` | no |
 | `budget_amount` | Monthly budget limit in USD. Must be greater than 0. | `number` | — | yes |
 | `budget_actual_threshold` | Percentage of the budget that actual spend must exceed to send an alert. | `number` | `80` | no |
 | `linked_account_ids` | Member account IDs the budget measures. Empty measures the whole account, or the whole organization in a management account. See [Budget scope](#budget-scope). | `list(string)` | `[]` | no |
@@ -240,6 +253,9 @@ The `SubscriptionArn` field must be a full ARN (not the string `PendingConfirmat
 | `cost_anomaly_subscription_name` | Name of the anomaly subscription. Defaults to the SNS topic name with a `-anomalies` suffix. | `string` | `null` | no |
 | `chatbot_guardrail_policy_arns` | IAM policy ARNs that cap what Chatbot users can do in the channel. AWS uses `AdministratorAccess` when the list is not set. | `list(string)` | `["arn:aws:iam::aws:policy/ReadOnlyAccess"]` | no |
 | `chatbot_user_authorization_required` | Require each Slack user to have their own IAM role mapping before they run commands through Chatbot. | `bool` | `true` | no |
+| `create_sns_topic` | Create the SNS topic and its policy. Set `false` and pass `sns_topic_arn` to publish to a topic that another call owns. | `bool` | `true` | no |
+| `sns_topic_arn` | ARN of an existing SNS topic for the alerts. Used only when `create_sns_topic = false`. See [Several budgets in one Slack channel](#several-budgets-in-one-slack-channel). | `string` | `null` | no |
+| `create_chatbot` | Create the Chatbot configuration and its IAM role. Set `false` in every other call that posts to the same channel. | `bool` | `true` | no |
 | `tags` | Tags to apply to all taggable resources created by this module. | `map(string)` | `{}` | no |
 
 ---
@@ -319,6 +335,12 @@ aws logs tail /aws/chatbot/<chatbot_configuration_name> \
   --since 30m \
   --region us-east-1
 ```
+
+---
+
+## Upgrade from v2.1.0
+
+v2.2.0 adds `count` to the topic, the topic policy, the Chatbot configuration and its IAM role. `moved` blocks in `main.tf` move the existing state. A plan on an existing stack shows only `has moved to … [0]` and no changes.
 
 ---
 
