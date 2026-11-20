@@ -3,18 +3,20 @@
 #-----------------------------------------------------------------------------------------------------------------------
 variable "slack_team_id" {
   type        = string
-  description = "Slack Workspace/Team ID registered with AWS Chatbot (starts with T, 9-11 chars, e.g. TXXXXXXXXX)"
+  description = "Slack Workspace/Team ID registered with AWS Chatbot (starts with T, 9-11 chars, e.g. TXXXXXXXXX). Required when create_chatbot is true"
+  default     = null
   validation {
-    condition     = can(regex("^T[A-Z0-9]{8,10}$", var.slack_team_id))
+    condition     = var.slack_team_id == null || can(regex("^T[A-Z0-9]{8,10}$", var.slack_team_id))
     error_message = "Slack Team ID must start with T followed by 8-10 uppercase alphanumeric characters."
   }
 }
 
 variable "slack_channel_id" {
   type        = string
-  description = "Slack Channel ID where budget alerts should be posted (starts with C, 9-11 chars, e.g. CXXXXXXXXXX)"
+  description = "Slack Channel ID where budget alerts should be posted (starts with C, 9-11 chars, e.g. CXXXXXXXXXX). Required when create_chatbot is true"
+  default     = null
   validation {
-    condition     = can(regex("^C[A-Z0-9]{8,10}$", var.slack_channel_id))
+    condition     = var.slack_channel_id == null || can(regex("^C[A-Z0-9]{8,10}$", var.slack_channel_id))
     error_message = "Slack Channel ID must start with C followed by 8-10 uppercase alphanumeric characters."
   }
 }
@@ -75,17 +77,42 @@ variable "budget_name" {
 
 variable "sns_topic_name" {
   type        = string
-  description = "Name of the SNS topic"
+  description = "Name of the SNS topic. With create_sns_topic = false, the module uses it only as the prefix of the default anomaly monitor and subscription names"
+}
+
+variable "create_sns_topic" {
+  type        = bool
+  description = "Create the SNS topic and its policy. Set false and pass sns_topic_arn to publish to a topic that another module call owns"
+  default     = true
+}
+
+variable "sns_topic_arn" {
+  type        = string
+  description = "ARN of an existing SNS topic for the alerts. Used only when create_sns_topic is false. The topic policy must let budgets.amazonaws.com publish, and costalerts.amazonaws.com when anomaly alerts are enabled"
+  default     = null
+
+  validation {
+    condition     = var.sns_topic_arn == null || can(regex("^arn:aws:sns:[a-z0-9-]+:[0-9]{12}:", var.sns_topic_arn))
+    error_message = "sns_topic_arn must be an SNS topic ARN."
+  }
+}
+
+variable "create_chatbot" {
+  type        = bool
+  description = "Create the Chatbot Slack channel configuration and its IAM role. AWS permits one configuration per Slack channel in an account, so set false in every other module call that posts to the same channel"
+  default     = true
 }
 
 variable "chatbot_configuration_name" {
   type        = string
-  description = "AWS Chatbot Slack configuration name"
+  description = "AWS Chatbot Slack configuration name. Required when create_chatbot is true"
+  default     = null
 }
 
 variable "chatbot_role_name" {
   type        = string
-  description = "IAM role name for AWS Chatbot"
+  description = "IAM role name for AWS Chatbot. Required when create_chatbot is true"
+  default     = null
 }
 
 variable "cost_types" {

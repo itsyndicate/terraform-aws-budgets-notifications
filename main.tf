@@ -2,25 +2,37 @@
 # Module resources for AWS Budget alerts to Slack
 #-----------------------------------------------------------------------------------------------------------------------
 
+locals {
+  # With create_sns_topic = false, the alerts go to var.sns_topic_arn, a topic that
+  # another module call owns. That call also owns the topic policy.
+  create_sns_topic = var.create_sns_topic
+  sns_topic_arn    = local.create_sns_topic ? aws_sns_topic.this[0].arn : var.sns_topic_arn
+}
+
 # SNS Topic for budget alert notifications
 resource "aws_sns_topic" "this" {
+  count = local.create_sns_topic ? 1 : 0
+
   name = var.sns_topic_name
   tags = merge(var.tags, { Name = var.sns_topic_name })
 }
 
 # SNS Topic Policy allowing AWS Budgets and AWS Chatbot access
 resource "aws_sns_topic_policy" "this" {
-  arn = aws_sns_topic.this.arn
+  count = local.create_sns_topic ? 1 : 0
 
-  policy = data.aws_iam_policy_document.sns_topic_policy.json
+  arn    = aws_sns_topic.this[0].arn
+  policy = data.aws_iam_policy_document.sns_topic_policy[0].json
 }
 
 data "aws_iam_policy_document" "sns_topic_policy" {
+  count = local.create_sns_topic ? 1 : 0
+
   statement {
     sid       = "AWSBudgetsPublish"
     effect    = "Allow"
     actions   = ["SNS:Publish"]
-    resources = [aws_sns_topic.this.arn]
+    resources = [aws_sns_topic.this[0].arn]
 
     principals {
       type        = "Service"
@@ -41,7 +53,7 @@ data "aws_iam_policy_document" "sns_topic_policy" {
       "SNS:Subscribe",
       "SNS:Receive"
     ]
-    resources = [aws_sns_topic.this.arn]
+    resources = [aws_sns_topic.this[0].arn]
 
     principals {
       type        = "Service"
@@ -57,7 +69,7 @@ data "aws_iam_policy_document" "sns_topic_policy" {
       sid       = "AWSAnomalyDetectionPublish"
       effect    = "Allow"
       actions   = ["SNS:Publish"]
-      resources = [aws_sns_topic.this.arn]
+      resources = [aws_sns_topic.this[0].arn]
 
       principals {
         type        = "Service"
@@ -112,7 +124,7 @@ resource "aws_ce_anomaly_subscription" "this" {
 
   subscriber {
     type    = "SNS"
-    address = aws_sns_topic.this.arn
+    address = local.sns_topic_arn
   }
 
   threshold_expression {
@@ -132,6 +144,8 @@ resource "aws_ce_anomaly_subscription" "this" {
 
 # IAM Role for AWS Chatbot
 resource "aws_iam_role" "chatbot" {
+  count = var.create_chatbot ? 1 : 0
+
   name               = var.chatbot_role_name
   assume_role_policy = data.aws_iam_policy_document.chatbot_assume_role.json
   tags               = merge(var.tags, { Name = var.chatbot_role_name })
@@ -150,8 +164,10 @@ data "aws_iam_policy_document" "chatbot_assume_role" {
 # Inline policy matching the "Notification permissions" template from the AWS Chatbot console:
 # CloudWatch read + CloudWatch Logs read + SNS read — all three are required per the runbook.
 resource "aws_iam_role_policy" "chatbot_notifications" {
+  count = var.create_chatbot ? 1 : 0
+
   name   = "ChatbotNotificationPermissions"
-  role   = aws_iam_role.chatbot.id
+  role   = aws_iam_role.chatbot[0].id
   policy = data.aws_iam_policy_document.chatbot_notifications.json
 }
 
@@ -199,18 +215,29 @@ data "aws_iam_policy_document" "chatbot_notifications" {
 }
 
 # AWS Chatbot Slack Channel Configuration
+# AWS permits one configuration per Slack channel in an account. Set create_chatbot = false
+# in every other module call that posts to the same channel.
 resource "aws_chatbot_slack_channel_configuration" "this" {
+  count = var.create_chatbot ? 1 : 0
+
   configuration_name = var.chatbot_configuration_name
-  iam_role_arn       = aws_iam_role.chatbot.arn
+  iam_role_arn       = aws_iam_role.chatbot[0].arn
   slack_channel_id   = var.slack_channel_id
   slack_team_id      = var.slack_team_id
-  sns_topic_arns     = [aws_sns_topic.this.arn]
+  sns_topic_arns     = [local.sns_topic_arn]
   logging_level      = "INFO"
 
   guardrail_policy_arns       = var.chatbot_guardrail_policy_arns
   user_authorization_required = var.chatbot_user_authorization_required
 
   tags = merge(var.tags, { Name = var.chatbot_configuration_name })
+
+  lifecycle {
+    precondition {
+      condition     = var.chatbot_configuration_name != null && var.chatbot_role_name != null && var.slack_team_id != null && var.slack_channel_id != null
+      error_message = "create_chatbot = true needs chatbot_configuration_name, chatbot_role_name, slack_team_id and slack_channel_id."
+    }
+  }
 }
 
 # AWS Budgets: Monthly cost budget
@@ -220,7 +247,14 @@ resource "aws_budgets_budget" "this" {
   limit_amount = tostring(var.budget_amount)
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
-  tags         = merge(var.tags, { Name = var.budget_name })
+
+  lifecycle {
+    precondition {
+      condition     = var.create_sns_topic || var.sns_topic_arn != null
+      error_message = "create_sns_topic = false needs sns_topic_arn."
+    }
+  }
+  tags = merge(var.tags, { Name = var.budget_name })
 
   # Omitted when var.linked_account_ids is empty, so the budget covers the whole account or organization.
   dynamic "cost_filter" {
@@ -257,7 +291,7 @@ resource "aws_budgets_budget" "this" {
     threshold                 = var.budget_actual_threshold
     threshold_type            = "PERCENTAGE"
     notification_type         = "ACTUAL"
-    subscriber_sns_topic_arns = [aws_sns_topic.this.arn]
+    subscriber_sns_topic_arns = [local.sns_topic_arn]
   }
 
   # Alert 2: forecasted spend is above budget_forecast_threshold percent
@@ -266,6 +300,32 @@ resource "aws_budgets_budget" "this" {
     threshold                 = var.budget_forecast_threshold
     threshold_type            = "PERCENTAGE"
     notification_type         = "FORECASTED"
-    subscriber_sns_topic_arns = [aws_sns_topic.this.arn]
+    subscriber_sns_topic_arns = [local.sns_topic_arn]
   }
+}
+
+# v2.1.0 created these resources without count.
+moved {
+  from = aws_sns_topic.this
+  to   = aws_sns_topic.this[0]
+}
+
+moved {
+  from = aws_sns_topic_policy.this
+  to   = aws_sns_topic_policy.this[0]
+}
+
+moved {
+  from = aws_iam_role.chatbot
+  to   = aws_iam_role.chatbot[0]
+}
+
+moved {
+  from = aws_iam_role_policy.chatbot_notifications
+  to   = aws_iam_role_policy.chatbot_notifications[0]
+}
+
+moved {
+  from = aws_chatbot_slack_channel_configuration.this
+  to   = aws_chatbot_slack_channel_configuration.this[0]
 }
